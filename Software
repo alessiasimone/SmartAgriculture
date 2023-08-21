@@ -1,0 +1,124 @@
+// C++ code
+//
+#include <LiquidCrystal_I2C.h>
+
+#define temp A0
+#define soil A2
+#define motor 11
+#define led 3
+#define button 2
+
+LiquidCrystal_I2C lcd(32,16,2);
+
+//creating plant icon
+byte plant[] = {
+  B10000,
+  B01011,
+  B00101,
+  B00100,
+  B11111,
+  B11111,
+  B01110,
+  B01110
+};
+
+volatile byte buttonReleased = HIGH;
+//this variable store the memory of the button
+//we are starting with button released = 1
+  
+void buttonReleasedInterrupt() {
+  buttonReleased = !buttonReleased;
+}
+//everytime the button state change, the storing-memory 
+//variable will change its status to the opposite
+
+
+void setup()
+{
+  
+  pinMode(soil, INPUT);
+  pinMode(temp, INPUT);
+  pinMode(motor, OUTPUT);
+  pinMode(led, OUTPUT);
+  pinMode(button, INPUT_PULLUP); //defining external pullup
+
+  lcd.begin(16,2);
+  lcd.init();
+  lcd.backlight();
+  
+  //assigning the plant icon an index and print it on 
+  //the bottom left of the screen
+  lcd.createChar(0, plant);
+  lcd.setCursor(0,1);
+  lcd.write(0);
+  
+  //the function detect the changing of the pin 2 from 0 to 1
+  //(buttonreleased) and everytime this changing happens 
+  //it will call the ISR function
+  attachInterrupt(digitalPinToInterrupt(button),
+                  buttonReleasedInterrupt, 
+                  RISING);
+ 
+}
+
+
+
+void loop()
+{
+  //ANALOG RANGE OF SENSORS
+  // soil_state = [0, 876]
+  // temperature = [-40, 124]
+  // motor = [0, 255]
+  
+  int soil_state = analogRead(soil);
+  int temperature = ((analogRead(temp) * 0.00488) - 0.5) / 0.01;
+  
+  //logit probability function from the logistic regression
+  //logit(p) = 0.1630 -0.6874 * soil moisture + 0.0236 * air temperature
+  float logit = 0.1630 - 0.6874 * soil_state + 0.0236 * temperature;
+  float proba = 1 / (1 + exp(-logit)); 
+  
+  int motor_analog;
+  if (proba > 0.5) {
+    motor_analog = 255;
+  }
+  else {
+    motor_analog = 0;
+  }
+  
+  analogWrite(motor, motor_analog);  
+  analogWrite(led, motor_analog); //led light the intensity of motor
+  
+  //255 motor_analog : 8492 RPM = motor_analog : x RPM
+  int RPM = (8492 * motor_analog) / 255;
+  
+  //water pump have a Qmax of 6 liters
+  //6 l : 8492RPM = x l : RPM
+  float water = ((0.1 * RPM) / 8492) * 60; 
+  
+  //actually, water is 1,37€ per cubic meter
+  // 1 cubic meter corresponds to 1000l
+  // 1,37 / 1000 -> 0.00137€ per liter of water
+  float euro = water * 0.00137;
+  
+  //by pressing and releasing the button, the euros are visualized
+  if (buttonReleased == LOW) {
+    lcd.setCursor(0,0);
+    lcd.print("Euros per  hour");
+    lcd.setCursor(5,1);
+    lcd.print(euro, 5);
+    
+  }//by default, the system start with the released button
+  //which is equal to high, then the status below appears 
+  //automatically if any changing is detected
+  else {
+    lcd.setCursor(0,0);
+    lcd.print("Liters per hour");
+    lcd.setCursor(5,1);
+    lcd.print(water,5); 
+  }
+  
+  //delay function allows the sleep mode to save power
+  delay(2000); //frequenzy of 0.5 Hz
+  
+}
